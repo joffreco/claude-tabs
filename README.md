@@ -154,6 +154,14 @@ usual cause is `PATH`: a user service does not inherit your shell's, so `claude`
 installed in `~/.local/bin` is invisible to it. That is what the
 `Environment=PATH=` line in `claude-tabs-ttyd.service` is for.
 
+**Ctrl+V pastes nothing.** Left to itself, xterm keeps the key, cancels the
+browser's paste and sends `^V` to the program, where Claude Code goes looking
+for an image in the clipboard and finds no text. The injected script takes the
+key before xterm and lets the browser paste normally, so text arrives; a
+clipboard holding an image yields no text, `^V` is then passed on, and Claude
+Code takes the image its own way. Ctrl+Shift+V works in any case, since xterm
+never claimed that one.
+
 **A tab shows "Press ⏎ to Reconnect".** That is ttyd's own message, and the tab
 should not stop there: the injected script waits for the servers and reloads the
 page by itself, which reattaches the conversation still running in tmux. Seeing

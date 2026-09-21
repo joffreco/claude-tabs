@@ -12,9 +12,10 @@ ttyd untouched:
               to name the tab
 
 The terminal page itself is relayed, but completed with an injected script that
-does two things ttyd leaves undone: it names the tab after the conversation
-rather than after the path of the command, and it brings a tab whose connection
-dropped back on its own once the servers answer again.
+does three things ttyd leaves undone: it names the tab after the conversation
+rather than after the path of the command, it brings a tab whose connection
+dropped back on its own once the servers answer again, and it makes Ctrl+V
+paste text into the terminal.
 """
 
 import gzip
@@ -293,10 +294,11 @@ def resume_page():
 
 # --- the terminal page ------------------------------------------------------------
 
-# Two scripts, injected into ttyd's page. The first one takes the tab's name in
-# hand: ttyd calls it "<title> | <command> (<host>)", whereas the conversation's
-# own name, asked for again and again, follows a rename or a switch made inside
-# the tab. The second one keeps the tab alive across a restart of the servers.
+# Three scripts, injected into ttyd's page. The first one takes the tab's name
+# in hand: ttyd calls it "<title> | <command> (<host>)", whereas the
+# conversation's own name, asked for again and again, follows a rename or a
+# switch made inside the tab. The second one keeps the tab alive across a
+# restart of the servers, and the third one gives Ctrl+V back to the browser.
 INJECTION = """<script>
 (function () {
   var id = new URLSearchParams(location.search).get('arg');
@@ -415,6 +417,55 @@ INJECTION = """<script>
   ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'].forEach(function (name, value) {
     window.WebSocket[name] = value;
   });
+})();
+(function () {
+  // Ctrl+V never pasted anything: xterm takes the key for itself, cancels the
+  // browser's own paste and sends ^V to the program, where Claude Code reads
+  // the clipboard by its own means — which finds images but no text. The key
+  // is caught here before xterm sees it, so the browser pastes as it would in
+  // any field, and the terminal receives the text. A clipboard holding an
+  // image gives no text, and ^V is then handed to the program after all, which
+  // leaves Claude Code's own way of taking images untouched.
+  var field = function () { return document.querySelector('.xterm-helper-textarea'); };
+  var relaying = false;
+
+  document.addEventListener('keydown', function (event) {
+    if (relaying || !event.ctrlKey || event.altKey || event.metaKey) { return; }
+    if (event.key !== 'v' && event.key !== 'V') { return; }
+    var target = field();
+    if (!target) { return; }
+    target.focus();
+    event.stopPropagation();          // and no preventDefault: the paste happens
+  }, true);
+
+  // The browser hands a paste to whatever holds the focus, and xterm listens
+  // only on its own hidden field: a paste made after a click outside the
+  // terminal would otherwise be lost.
+  document.addEventListener('paste', function (event) {
+    var target = field();
+    if (!target) { return; }
+    var data = event.clipboardData;
+    var text = data ? data.getData('text/plain') : '';
+
+    if (!text && data && data.files.length) {
+      event.preventDefault();         // an image: let the program ask for it
+      relaying = true;
+      target.focus();
+      target.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'v', code: 'KeyV', ctrlKey: true, bubbles: true, cancelable: true
+      }));
+      relaying = false;
+      return;
+    }
+
+    if (event.target === target || !text) { return; }
+    event.preventDefault();
+    var carrier = new DataTransfer();
+    carrier.setData('text/plain', text);
+    target.focus();
+    target.dispatchEvent(new ClipboardEvent('paste',
+      { clipboardData: carrier, bubbles: true, cancelable: true }));
+  }, true);
 })();
 </script>
 """
