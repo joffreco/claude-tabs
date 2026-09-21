@@ -1,0 +1,15 @@
+[Unit]
+Description=Claude tabs front end (/new, /resume, /title)
+Requires=claude-tabs-ttyd.service
+After=claude-tabs-ttyd.service
+
+[Service]
+Type=exec
+Environment=PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+EnvironmentFile=-%h/.config/claude-tabs/env
+ExecStart=/usr/bin/python3 %h/.local/bin/claude-tabs-front
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

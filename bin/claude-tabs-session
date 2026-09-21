@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Launched by ttyd for every browser tab. The identifier carried by the URL
+# (?arg=<uuid>) is the Claude session id itself, which is what makes a bookmark
+# survive a reboot: the conversation can always be replayed from its transcript.
+set -uo pipefail
+
+PATH="$HOME/.local/bin:$PATH"
+env_file="$HOME/.config/claude-tabs/env"
+if [ -f "$env_file" ]; then set -a; . "$env_file"; set +a; fi
+WORKDIR="${CLAUDE_TABS_DIR:-$HOME}"
+PORT="${CLAUDE_TABS_PORT:-7681}"
+
+id="${1:-}"
+if [[ ! "$id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+  printf '\033]0;%s\007' 'claude — new session'
+  cat <<EOF
+
+This address carries no valid session identifier.
+
+    http://localhost:$PORT/new      opens a fresh conversation
+    http://localhost:$PORT/resume   lists the existing ones
+
+EOF
+  read -rsn1 -p 'Press any key to close…'
+  exit 1
+fi
+
+# Claude stores transcripts under a directory named after the working directory,
+# with / . and _ turned into dashes.
+store="$HOME/.claude/projects/$(printf '%s' "$WORKDIR" | tr './_' '---')/$id.jsonl"
+
+# First guess at the tab name, for the brief moment before the page asks /title.
+title="claude ${id:0:8}"
+if [ -f "$store" ]; then
+  first=$(jq -r 'select(.type == "user") | select(.message.content | type == "string") | .message.content' "$store" 2>/dev/null |
+    grep -vE '^\s*(<|$)' | head -n 1 | tr -d '\n\r' | cut -c1-50)
+  [ -n "${first:-}" ] && title="$first"
+fi
+printf '\033]0;%s\007' "$title"
+
+cd "$WORKDIR" || exit 1
+
+# A dedicated tmux server (-L) keeps conversations alive once the tab is closed,
+# without disturbing the tmux you use elsewhere. -A reattaches an existing one,
+# so the command below only ever runs when the session is created.
+tmux_cmd=(tmux -L claude-tabs -f "$HOME/.config/claude-tabs/tmux.conf")
+runner="$(dirname "$(readlink -f "$0")")/claude-tabs-run"
+
+# The server must not be born inside the control group of the ttyd service:
+# systemd kills a whole group when it stops a unit, so restarting ttyd would
+# take every conversation with it. Started apart, in a transient scope, it
+# outlives the servers and ends only with its last conversation.
+if ! "${tmux_cmd[@]}" ls >/dev/null 2>&1 &&
+  [ -d /run/systemd/system ] && command -v systemd-run >/dev/null 2>&1; then
+  systemd-run --user --scope --quiet --collect --unit=claude-tabs-tmux \
+    "${tmux_cmd[@]}" new-session -A -d -s "$id" -- "$runner" "$id" >/dev/null 2>&1 || true
+fi
+
+exec "${tmux_cmd[@]}" new-session -A -s "$id" -- "$runner" "$id"

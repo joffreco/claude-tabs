@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Drives the Claude sessions served to the browser.
+# Goes through systemd when it is running, otherwise starts both processes itself.
+set -euo pipefail
+
+# Written by install.sh; exported so that ttyd and its children see it too.
+env_file="$HOME/.config/claude-tabs/env"
+if [ -f "$env_file" ]; then set -a; . "$env_file"; set +a; fi
+
+PORT="${CLAUDE_TABS_PORT:-7681}"
+TTYD_PORT="${CLAUDE_TABS_TTYD_PORT:-7682}"
+LOG="$HOME/.local/state/claude-tabs.log"
+TMUX_CMD=(tmux -L claude-tabs -f "$HOME/.config/claude-tabs/tmux.conf")
+mkdir -p "$(dirname "$LOG")"
+
+# /run/systemd/system only exists when systemd really is the init of this
+# distribution; under WSLg, $XDG_RUNTIME_DIR holds a misleading systemd socket.
+with_systemd() { [ -d /run/systemd/system ] && systemctl --user show --property=Version >/dev/null 2>&1; }
+
+# Patterns anchored on the whole command line: a bare "pkill -f claude-tabs-front"
+# would also kill any shell whose command line contains that word, including the
+# one calling this script.
+TTYD_PATTERN='^[^ ]*ttyd( .*)? [^ ]*claude-tabs-session$'
+FRONT_PATTERN='^[^ ]*python3 [^ ]*claude-tabs-front$'
+ttyd_pid() { local p; p=$(pgrep -f "$TTYD_PATTERN" | head -n 1); [ -n "$p" ] && echo "$p"; }
+front_pid() { local p; p=$(pgrep -f "$FRONT_PATTERN" | head -n 1); [ -n "$p" ] && echo "$p"; }
+
+start_stack() {
+  if with_systemd; then
+    systemctl --user start claude-tabs.service
+    echo "Started through systemd."
+    return
+  fi
+  [ -n "$(ttyd_pid)" ] || nohup ttyd --writable --url-arg --interface 127.0.0.1 \
+    --port "$TTYD_PORT" --ping-interval 30 \
+    -t disableResizeOverlay=true -t disableLeaveAlert=true \
+    "$HOME/.local/bin/claude-tabs-session" >>"$LOG" 2>&1 &
+  sleep 1
+  [ -n "$(front_pid)" ] || nohup python3 "$HOME/.local/bin/claude-tabs-front" >>"$LOG" 2>&1 &
+  sleep 1
+  [ -n "$(front_pid)" ] || { echo "Failed to start, see $LOG" >&2; exit 1; }
+  echo "Started (without systemd)."
+}
+
+stop_stack() {
+  if with_systemd; then
+    systemctl --user stop claude-tabs.service claude-tabs-ttyd.service
+  else
+    for pid in $(front_pid || true) $(ttyd_pid || true); do
+      kill "$pid" 2>/dev/null || true
+    done
+  fi
+  echo "Servers stopped; the tmux conversations keep running."
+}
+
+case "${1:-start}" in
+start)
+  start_stack
+  echo "Sessions : http://localhost:$PORT/resume"
+  echo "New one  : http://localhost:$PORT/new"
+  ;;
+stop) stop_stack ;;
+restart) stop_stack; sleep 1; start_stack ;;
+status)
+  if with_systemd; then
+    systemctl --user --no-pager status claude-tabs-ttyd.service claude-tabs.service || true
+  else
+    echo "ttyd  : pid $(ttyd_pid || echo 'stopped')"
+    echo "front : pid $(front_pid || echo 'stopped')"
+  fi
+  ;;
+new) echo "http://localhost:$PORT/new" ;;
+list)
+  "${TMUX_CMD[@]}" list-sessions \
+    -F "http://localhost:$PORT?arg=#{session_name}   #{?session_attached,open,detached}, since #{t:session_created}" 2>/dev/null ||
+    echo "No conversation running."
+  ;;
+kill)
+  [ $# -ge 2 ] || { echo "Usage: claude-tabs kill <identifier>" >&2; exit 1; }
+  "${TMUX_CMD[@]}" kill-session -t "$2" && echo "Session $2 terminated."
+  ;;
+*)
+  echo "Usage: claude-tabs [start|stop|restart|status|new|list|kill <id>]" >&2
+  exit 1
+  ;;
+esac

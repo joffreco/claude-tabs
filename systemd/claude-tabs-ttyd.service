@@ -1,0 +1,18 @@
+[Unit]
+Description=ttyd — Claude terminals served to the browser
+PartOf=claude-tabs.service
+
+[Service]
+Type=exec
+# A user service does not inherit your shell PATH: without this line the
+# "claude" command installed in ~/.local/bin would be nowhere to be found.
+Environment=PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+EnvironmentFile=-%h/.config/claude-tabs/env
+ExecStart=/usr/bin/ttyd --writable --url-arg --interface 127.0.0.1 --port 7682 --ping-interval 30 \
+    -t disableResizeOverlay=true -t disableLeaveAlert=true \
+    %h/.local/bin/claude-tabs-session
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

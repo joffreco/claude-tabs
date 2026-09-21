@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Runs inside tmux. It starts Claude, then holds the terminal open whatever
+# happens: a process that exits immediately makes the ttyd client reconnect at
+# once, and the tab ends up in an endless reload loop.
+set -uo pipefail
+
+PATH="$HOME/.local/bin:$PATH"
+env_file="$HOME/.config/claude-tabs/env"
+if [ -f "$env_file" ]; then set -a; . "$env_file"; set +a; fi
+WORKDIR="${CLAUDE_TABS_DIR:-$HOME}"
+id="${1:?missing session identifier}"
+store="$HOME/.claude/projects/$(printf '%s' "$WORKDIR" | tr './_' '---')/$id.jsonl"
+
+cd "$WORKDIR" || exit 1
+
+if ! command -v claude >/dev/null 2>&1; then
+  printf '\n  The "claude" command was not found.\n\n  PATH: %s\n\n' "$PATH"
+  echo "  Add its directory to the service PATH in systemd/claude-tabs-ttyd.service,"
+  echo "  then run install.sh again and restart claude-tabs.service."
+else
+  if [ -f "$store" ]; then
+    claude --resume "$id"
+  else
+    claude --session-id "$id"
+  fi
+  code=$?
+  printf '\n  Claude exited (status %s).\n' "$code"
+fi
+
+echo "  Press r to start this conversation again, or just close the tab."
+while true; do
+  if read -rsn1 key; then
+    case "$key" in
+      r | R) exec "$0" "$id" ;;
+    esac
+  else
+    sleep 3600
+  fi
+done
