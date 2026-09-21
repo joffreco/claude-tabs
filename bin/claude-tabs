@@ -7,6 +7,8 @@ set -euo pipefail
 env_file="$HOME/.config/claude-tabs/env"
 if [ -f "$env_file" ]; then set -a; . "$env_file"; set +a; fi
 
+ROOT="$(dirname "$(dirname "$(readlink -f "$0")")")"
+VERSION="$(cat "$ROOT/VERSION" 2>/dev/null || echo unknown)"
 PORT="${CLAUDE_TABS_PORT:-7681}"
 TTYD_PORT="${CLAUDE_TABS_TTYD_PORT:-7682}"
 LOG="$HOME/.local/state/claude-tabs.log"
@@ -70,6 +72,7 @@ status)
   fi
   ;;
 new) echo "http://localhost:$PORT/new" ;;
+version | --version | -v) echo "claude-tabs $VERSION" ;;
 list)
   "${TMUX_CMD[@]}" list-sessions \
     -F "http://localhost:$PORT?arg=#{session_name}   #{?session_attached,open,detached}, since #{t:session_created}" 2>/dev/null ||
@@ -80,7 +83,7 @@ kill)
   "${TMUX_CMD[@]}" kill-session -t "$2" && echo "Session $2 terminated."
   ;;
 *)
-  echo "Usage: claude-tabs [start|stop|restart|status|new|list|kill <id>]" >&2
+  echo "Usage: claude-tabs [start|stop|restart|status|new|list|kill <id>|version]" >&2
   exit 1
   ;;
 esac

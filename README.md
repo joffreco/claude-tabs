@@ -16,6 +16,10 @@ every keystroke, picker and slash command exactly as in your shell.
 Built on WSL2, but nothing in it is specific to that: any Linux with ttyd, tmux
 and Python 3 will do.
 
+**Status: 0.1.0, pre-1.0.** It works and is in daily use, but the URL scheme, the
+command names and the layout of `~/.config/claude-tabs` may still change from one
+0.x release to the next. Pin a tag if you need it to stay put.
+
 ## What you get
 
 | Address | What it does |
@@ -89,6 +93,7 @@ claude-tabs status     state of the two processes
 claude-tabs new        print the address that creates a conversation
 claude-tabs list       the running conversations, with their addresses
 claude-tabs kill <id>  end one conversation
+claude-tabs version    print the installed version
 ```
 
 ## How it is built

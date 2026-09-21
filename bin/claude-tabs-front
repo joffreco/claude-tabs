@@ -50,6 +50,10 @@ WORKDIR = Path(_settings["CLAUDE_TABS_DIR"])
 TMUX = ["tmux", "-L", "claude-tabs", "-f", str(Path.home() / ".config/claude-tabs/tmux.conf")]
 STORE = Path.home() / ".claude/projects" / re.sub(r"[/._]", "-", str(WORKDIR))
 REGISTRY = Path.home() / ".claude/sessions"
+try:
+    VERSION = (Path(__file__).resolve().parent.parent / "VERSION").read_text().strip()
+except OSError:
+    VERSION = "unknown"
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 MAX_SESSIONS = 60
 TITLE_LENGTH = 60
@@ -256,7 +260,7 @@ PAGE = """<!DOCTYPE html>
 {list}
 <footer>Sessions marked running live in tmux; the others are replayed from their
 transcript. Bookmark one with Ctrl+D to come straight back to it. From the shell:
-<code>claude-tabs list</code>.</footer>
+<code>claude-tabs list</code>. — claude-tabs {version}</footer>
 </main></body></html>
 """
 
@@ -281,7 +285,8 @@ def resume_page():
                 f'<span class="date">{since(card["date"])}</span></a></li>'
             )
         listing = "<ul>" + "".join(rows) + "</ul>"
-    return PAGE.format(workdir=html.escape(WORKDIR.name or str(WORKDIR)), list=listing)
+    return PAGE.format(workdir=html.escape(WORKDIR.name or str(WORKDIR)),
+                       list=listing, version=html.escape(VERSION))
 
 
 # --- the terminal page ------------------------------------------------------------
