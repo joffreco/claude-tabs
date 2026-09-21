@@ -30,9 +30,12 @@ command names and the layout of `~/.config/claude-tabs` may still change from on
 | `http://localhost:7681/` | redirects to `/resume` |
 | `http://localhost:7681/title?id=<uuid>` | a conversation's name, as JSON |
 
-Reloading a conversation's tab reattaches it instead of opening a second one. The
-tab is named after the conversation, using the name Claude gives it, so a fresh
-session starts out as `claude 6ccdc448` and renames itself once it has a subject.
+Reloading a conversation's tab reattaches it instead of opening a second one,
+and restarting the servers leaves both the conversations and the tabs alone: the
+tmux server lives outside the two services, and a tab whose connection drops
+waits for them to answer, then reloads itself and reattaches. The tab is named
+after the conversation, using the name Claude gives it, so a fresh session
+starts out as `claude 6ccdc448` and renames itself once it has a subject.
 Rename a conversation or switch to another one from inside the tab and the tab
 name follows, because the name is read from the session registry Claude keeps in
 `~/.claude/sessions`, not from the address bar.
@@ -102,6 +105,7 @@ claude-tabs version    print the installed version
 browser ──▶ claude-tabs-front (Python, 127.0.0.1:7681)
               ├── /new, /resume, /title : answered here
               ├── the terminal page     : relayed, plus a script that names the tab
+              │                           and brings it back after an outage
               └── everything else       : spliced onto ttyd, websocket included
                      │
                      ▼
@@ -150,11 +154,12 @@ usual cause is `PATH`: a user service does not inherit your shell's, so `claude`
 installed in `~/.local/bin` is invisible to it. That is what the
 `Environment=PATH=` line in `claude-tabs-ttyd.service` is for.
 
-**A tab shows "Press ⏎ to Reconnect".** The websocket was cut — the servers were
-restarted, or WSL was suspended long enough for the connection to lapse. The
-conversation itself is untouched in tmux: pressing Enter reattaches it where it
-was. Should the tab instead come back empty, the tmux server had died too, and
-the address still replays the conversation from its transcript.
+**A tab shows "Press ⏎ to Reconnect".** That is ttyd's own message, and the tab
+should not stop there: the injected script waits for the servers and reloads the
+page by itself, which reattaches the conversation still running in tmux. Seeing
+it stay means the page was served by an older version — a hard reload
+(Ctrl+Shift+R) picks up the current one — or that the front end is down as well,
+in which case the tab has no one left to ask.
 
 **A tab keeps its old title.** Chrome caches the terminal page; a hard reload
 (Ctrl+Shift+R) picks up the current one.

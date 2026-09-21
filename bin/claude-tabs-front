@@ -11,8 +11,10 @@ ttyd untouched:
     /title    the name of a conversation, which the terminal page polls in order
               to name the tab
 
-The terminal page itself is relayed, but completed with an injected script:
-ttyd would otherwise name the tab after the path of the command it runs.
+The terminal page itself is relayed, but completed with an injected script that
+does two things ttyd leaves undone: it names the tab after the conversation
+rather than after the path of the command, and it brings a tab whose connection
+dropped back on its own once the servers answer again.
 """
 
 import gzip
@@ -291,9 +293,10 @@ def resume_page():
 
 # --- the terminal page ------------------------------------------------------------
 
-# ttyd names the tab "<title> | <command> (<host>)". This script takes over
-# document.title, then asks for the conversation's name and keeps asking, so that
-# a rename or a conversation switch made inside the tab shows up in the tab strip.
+# Two scripts, injected into ttyd's page. The first one takes the tab's name in
+# hand: ttyd calls it "<title> | <command> (<host>)", whereas the conversation's
+# own name, asked for again and again, follows a rename or a switch made inside
+# the tab. The second one keeps the tab alive across a restart of the servers.
 INJECTION = """<script>
 (function () {
   var id = new URLSearchParams(location.search).get('arg');
@@ -325,6 +328,93 @@ INJECTION = """<script>
     if (!document.hidden) { refresh(); }
   });
   refresh();
+})();
+(function () {
+  // ttyd gives up as soon as the browser reports an error on its socket, and
+  // the tab then waits for a keystroke: restarting the servers leaves every
+  // open tab on "Press ⏎ to Reconnect". The socket is wrapped here, so that a
+  // tab whose connection drops waits for ttyd to answer again and reloads
+  // itself, which reattaches the conversation still running in tmux.
+  var Native = window.WebSocket;
+  if (!Native || !window.fetch) { return; }
+  var leaving = false, waiting = false, timer = null, box = null;
+  var current = null, opened = 0;
+
+  var notice = function (text) {
+    if (!box) {
+      box = document.createElement('div');
+      box.style.cssText = 'position:fixed;top:1em;left:50%;transform:translateX(-50%);' +
+        'z-index:2147483647;padding:.4em .9em;border-radius:4px;background:#222;color:#ddd;' +
+        'font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;box-shadow:0 2px 10px #0008';
+      (document.body || document.documentElement).appendChild(box);
+    }
+    box.textContent = text;
+    box.style.display = '';
+  };
+
+  var settle = function () {          // the socket came back on its own
+    waiting = false;
+    clearTimeout(timer);
+    if (box) { box.style.display = 'none'; }
+  };
+
+  var probe = function (delay) {
+    if (!waiting) { return; }
+    fetch('/token', { cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) { throw new Error(r.status); }
+        if (waiting) { location.reload(); }
+      })
+      .catch(function () {
+        timer = setTimeout(function () { probe(Math.min(delay * 1.5, 5000)); }, delay);
+      });
+  };
+
+  // A connection that dies within seconds of opening means the process behind
+  // the tab is exiting at once, not that the server went away: reloading would
+  // only spin the page. ttyd already reconnects on its own in that case.
+  var lost = function (lifetime) {
+    if (leaving || waiting || lifetime < 5000) { return; }
+    waiting = true;
+    notice('Connection lost — waiting for the server, the tab comes back on its own.');
+    timer = setTimeout(function () { probe(500); }, 400);
+  };
+
+  var going = function () { leaving = true; };
+  window.addEventListener('beforeunload', going);
+  window.addEventListener('pagehide', going);
+  window.addEventListener('pageshow', function () { leaving = false; });
+
+  // A tab left in the background is slowed down by the browser, which delays
+  // the timers above by up to a minute, and sometimes freezes the page
+  // altogether. Coming back to the tab therefore starts the search again at
+  // once, and a connection found dead is treated as lost even if its event
+  // never arrived.
+  var awaken = function () {
+    if (document.hidden) { return; }
+    if (waiting) {
+      clearTimeout(timer);
+      probe(500);
+    } else if (current && current.readyState > 1 && opened) {
+      lost(Date.now() - opened);
+    }
+  };
+  document.addEventListener('visibilitychange', awaken);
+  window.addEventListener('focus', awaken);
+
+  window.WebSocket = function (url, protocols) {
+    var socket = arguments.length > 1 ? new Native(url, protocols) : new Native(url);
+    current = socket;
+    socket.addEventListener('open', function () { opened = Date.now(); settle(); });
+    socket.addEventListener('close', function () {
+      lost(opened ? Date.now() - opened : 0);
+    });
+    return socket;
+  };
+  window.WebSocket.prototype = Native.prototype;
+  ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'].forEach(function (name, value) {
+    window.WebSocket[name] = value;
+  });
 })();
 </script>
 """
@@ -448,6 +538,17 @@ def serve(client):
             except OSError:
                 client.sendall(response("<h1>ttyd is not answering</h1>", "502 Bad Gateway"))
             return
+
+        # Only the first request of a connection is read here; the rest is
+        # spliced onto ttyd byte for byte. A browser reusing such a connection
+        # would therefore ask ttyd for the terminal page directly and get it
+        # without the injected script, so anything but a websocket handshake is
+        # forwarded with Connection: close and the connection serves once.
+        if b"upgrade" not in buffer.split(b"\r\n\r\n", 1)[0].lower():
+            head, separator, rest = buffer.partition(b"\r\n\r\n")
+            head = re.sub(rb"\r\n(connection|keep-alive):[^\r\n]*", b"", head,
+                          flags=re.IGNORECASE) + b"\r\nConnection: close"
+            buffer = head + separator + rest
 
         try:
             upstream = socket.create_connection(("127.0.0.1", TTYD_PORT), timeout=10)
