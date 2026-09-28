@@ -294,11 +294,12 @@ def resume_page():
 
 # --- the terminal page ------------------------------------------------------------
 
-# Three scripts, injected into ttyd's page. The first one takes the tab's name
+# Four scripts, injected into ttyd's page. The first one takes the tab's name
 # in hand: ttyd calls it "<title> | <command> (<host>)", whereas the
 # conversation's own name, asked for again and again, follows a rename or a
 # switch made inside the tab. The second one keeps the tab alive across a
-# restart of the servers, and the third one gives Ctrl+V back to the browser.
+# restart of the servers, the third one gives Ctrl+V back to the browser, and
+# the fourth copies a selection made in the page to the clipboard.
 INJECTION = """<script>
 (function () {
   var id = new URLSearchParams(location.search).get('arg');
@@ -466,6 +467,44 @@ INJECTION = """<script>
     target.dispatchEvent(new ClipboardEvent('paste',
       { clipboardData: carrier, bubbles: true, cancelable: true }));
   }, true);
+})();
+(function () {
+  // Selecting with the mouse goes to tmux, which reports it to the clipboard on
+  // its own side. Holding Shift bypasses mouse reporting and selects in the
+  // page instead, and that selection is nowhere until it is copied: xterm keeps
+  // it to itself, so it never becomes a document selection the browser knows
+  // about. It is copied here as soon as it settles, the way a terminal
+  // emulator does.
+  var term = window.term;
+  if (!term || typeof term.onSelectionChange !== 'function') { return; }
+
+  var fallback = function (text) {   // when writeText is refused, copy the old way
+    var field = document.createElement('textarea');
+    field.value = text;
+    field.setAttribute('readonly', '');
+    field.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+    document.body.appendChild(field);
+    var kept = document.activeElement;
+    field.select();
+    try { document.execCommand('copy'); } catch (e) { /* nothing left to try */ }
+    document.body.removeChild(field);
+    if (kept && kept.focus) { kept.focus(); }
+  };
+
+  var last = '', timer = null;
+  term.onSelectionChange(function () {
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      var text = term.getSelection();
+      if (!text || text === last) { return; }
+      last = text;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(function () { fallback(text); });
+      } else {
+        fallback(text);
+      }
+    }, 120);                          // let a drag finish before copying
+  });
 })();
 </script>
 """

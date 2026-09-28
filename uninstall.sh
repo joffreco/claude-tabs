@@ -15,7 +15,8 @@ else
 fi
 
 tmux -L claude-tabs kill-server 2>/dev/null || true
-rm -f "$bin"/claude-tabs "$bin"/claude-tabs-front "$bin"/claude-tabs-session "$bin"/claude-tabs-run
+rm -f "$bin"/claude-tabs "$bin"/claude-tabs-front "$bin"/claude-tabs-session \
+      "$bin"/claude-tabs-run "$bin"/claude-tabs-copy
 rm -f "$conf/tmux.conf" "$conf/env" "$units/claude-tabs.service" "$units/claude-tabs-ttyd.service"
 rmdir "$conf" 2>/dev/null || true
 systemctl --user daemon-reload 2>/dev/null || true

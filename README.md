@@ -141,6 +141,7 @@ All four scripts read the same variables, either from the environment or from
 | `CLAUDE_TABS_PORT` | `7681` | the front end's port, the one you browse to |
 | `CLAUDE_TABS_TTYD_PORT` | `7682` | ttyd's internal port |
 | `CLAUDE_TABS_DIR` | `$HOME` | working directory of the Claude sessions |
+| `CLAUDE_TABS_COPY_CMD` | detected | command a selection is piped to, `clip.exe` under WSL |
 
 The ports are also written into the systemd units, so change them in both places.
 
@@ -161,6 +162,17 @@ key before xterm and lets the browser paste normally, so text arrives; a
 clipboard holding an image yields no text, `^V` is then passed on, and Claude
 Code takes the image its own way. Ctrl+Shift+V works in any case, since xterm
 never claimed that one.
+
+**Selected text never reaches the clipboard.** Two selections exist in a tab and
+neither used to go anywhere. Mouse reporting is on, so an ordinary drag selects
+inside tmux: `claude-tabs-copy` is now piped the result and puts it on the system
+clipboard — the Windows one under WSL, through `clip.exe`, looked up by absolute
+path because a user service's `PATH` carries no `/mnt/c` entries. Holding Shift
+bypasses tmux and selects in the page instead, and the injected script copies
+that one as soon as it settles. Set `CLAUDE_TABS_COPY_CMD` to override the sink.
+An existing tmux server keeps the configuration it started with, so run
+`install.sh` again after an update — it reloads the configuration into the
+running server.
 
 **A tab shows "Press ⏎ to Reconnect".** That is ttyd's own message, and the tab
 should not stop there: the injected script waits for the servers and reloads the

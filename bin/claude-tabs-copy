@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Reads text on stdin and puts it on the system clipboard.
+# Called by tmux when a mouse selection ends, so that selecting text inside a
+# conversation lands in the clipboard of the machine you are sitting at.
+# Under WSL that means the Windows clipboard, through clip.exe.
+set -uo pipefail
+
+if [ -n "${CLAUDE_TABS_COPY_CMD:-}" ]; then
+  exec sh -c "$CLAUDE_TABS_COPY_CMD"
+fi
+
+# WSL first: the browser runs on the Windows side, so that is the clipboard the
+# user actually pastes from. clip.exe takes UTF-8 and keeps accents.
+# It is looked up by absolute path as well, because the PATH of a systemd user
+# service does not carry the /mnt/c entries that an interactive shell has.
+if grep -qi microsoft /proc/version 2>/dev/null; then
+  if command -v clip.exe >/dev/null 2>&1; then
+    exec clip.exe
+  fi
+  for candidate in /mnt/c/Windows/System32/clip.exe /mnt/c/Windows/system32/clip.exe; do
+    [ -x "$candidate" ] && exec "$candidate"
+  done
+fi
+
+for sink in "wl-copy" "xclip -selection clipboard" "xsel --clipboard --input" "pbcopy"; do
+  if command -v "${sink%% *}" >/dev/null 2>&1; then
+    exec sh -c "$sink"
+  fi
+done
+
+# Nothing to copy into: swallow the text rather than let tmux report an error.
+cat >/dev/null

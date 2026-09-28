@@ -35,7 +35,7 @@ workdir="${workdir/#\~/$HOME}"
 workdir="$(cd "$workdir" 2>/dev/null && pwd)" || { echo "No such directory: $workdir" >&2; exit 1; }
 printf 'CLAUDE_TABS_DIR=%s\n' "$workdir" >"$env_file"
 
-for script in claude-tabs claude-tabs-front claude-tabs-session claude-tabs-run; do
+for script in claude-tabs claude-tabs-front claude-tabs-session claude-tabs-run claude-tabs-copy; do
   chmod +x "$root/bin/$script"
   ln -sfn "$root/bin/$script" "$bin/$script"
 done
@@ -44,6 +44,13 @@ install -m 644 "$root/systemd/claude-tabs.service" "$root/systemd/claude-tabs-tt
 
 echo "Scripts linked into $bin, units copied into $units."
 echo "Sessions will run in $workdir."
+
+# A running tmux server keeps the configuration it was born with, and it
+# outlives the services on purpose, so hand it the current one.
+if tmux -L claude-tabs has-session 2>/dev/null; then
+  tmux -L claude-tabs source-file "$conf/tmux.conf" 2>/dev/null &&
+    echo "Configuration reloaded into the running tmux server."
+fi
 
 if [ -d /run/systemd/system ]; then
   systemctl --user daemon-reload
